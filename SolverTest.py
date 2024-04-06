@@ -95,23 +95,7 @@ def homogenization3d(mesh_size,C0,x,voxel):
     edofMat = edofMat[existEle[0]*mesh_size**2+existEle[2]*mesh_size+nely-1-existEle[1]]
     existDof = np.unique(edofMat)
     x_line = x[existEle]
-    # nodeids = np.mat(np.reshape(range(0,nely*nelx),(nely,nelx))).T
-    # nodeids = np.mat(np.reshape(range(0,nely*nelx),(nelx,nely))).T
-    # nodeids = np.hstack((nodeids,nodeids[:,0]))
-    # nodeids = np.vstack((nodeids,nodeids[0,:]))
-    # nodeidz = np.hstack((range(0,(nelz-1)*nely*nelx+1,nely*nelx),[0]))
-    # for i in range(nelz+1):
-    #     nodeid[i] = nodeids +nodeidz[i] 
-    # for i in range(nele):
-    #     grdz = i//(nelx*nely)
-    #     grdzs = np.repeat([grdz,grdz+1],4)
-    #     grdx = (i-grdz*(nelx*nely))//nely
-    #     grdxs = np.hstack(([grdx,grdx+1,grdx+1,grdx],[grdx,grdx+1,grdx+1,grdx]))
-    #     grdy = nely-(i-grdz*nelx*nely-grdx*nely)-1
-    #     grdys = np.hstack(([grdy,grdy,grdy+1,grdy+1],[grdy,grdy,grdy+1,grdy+1]))
-    #     edofMat2[i,:] = 3*np.repeat(nodeid[grdzs,nely-grdys,grdxs],3) + np.kron([1]*8,[0,1,2])
-    # print(np.sum(edofMat2-edofMat))
-    
+
     iK = np.reshape(np.kron(edofMat,np.ones((24,1))),(-1))
     jK = np.reshape(np.kron(edofMat,np.ones((1,24))),(-1))
     sK = np.zeros(len(iK))
@@ -137,7 +121,7 @@ def homogenization3d(mesh_size,C0,x,voxel):
     K_active = K[np.setdiff1d(existDof,[0,1,2]),:][:,np.setdiff1d(existDof,[0,1,2])]
     F_active = F[np.setdiff1d(existDof,[0,1,2]),:]
      
-    #---solve U matrix------
+    # ! ---solve U matrix------
     stime = time.time()
 
     import linalg_solve_moudle as ls
