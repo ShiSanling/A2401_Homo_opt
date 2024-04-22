@@ -1,0 +1,14 @@
+{
+    "files.associations": {
+        "*.cpp": "cpp",
+        "*.slurm": "shellscript",
+        "*.py": "python",
+        "array": "cpp",
+        "deque": "cpp",
+        "string": "cpp",
+        "unordered_map": "cpp",
+        "vector": "cpp",
+        "string_view": "cpp",
+        "initializer_list": "cpp"
+    }
+}

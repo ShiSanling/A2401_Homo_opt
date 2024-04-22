@@ -104,6 +104,11 @@ def homogenization3d(mesh_size,C0,x,voxel):
         x_current[np.where(voxel!=i)]=0
         sK = sK +np.reshape(np.dot(np.reshape(Ke[i],(24*24,1)),Emin+np.reshape(x_current[existEle]**3,(-1,1)).T*(E0-Emin)).T,(-1))
 
+    print(len(iK))
+    with open('A.txt','w') as f:
+        f.write('%d %d %d\n'%(3*nele,3*nele,len(iK)))
+        for index in range(len(iK)):
+            f.write('%d %d %.8f\n'%(iK[index],jK[index],sK[index]))
 
     K = sparse.csc_matrix((sK,(iK,jK)),shape=(3*nele,3*nele),dtype=np.float32)
     K = (K+K.T)/2 
@@ -116,11 +121,16 @@ def homogenization3d(mesh_size,C0,x,voxel):
         x_current[np.where(voxel!=i)]=0
         sF = sF + np.array(np.kron((x_current[existEle]**3).reshape(-1,1),Fe[i]).T.reshape((1,-1)))[0]
 
+    with open('b.txt','w') as f:
+        for index in range(len(iF)):
+            f.write('%d %.8f\n'%(iF[index],sF[index]))
+            
     F = sparse.csc_matrix((sF,(iF,jF)),shape=((3*nele,6)),dtype=np.float32)
     U = np.zeros((ndof,6))
     K_active = K[np.setdiff1d(existDof,[0,1,2]),:][:,np.setdiff1d(existDof,[0,1,2])]
     F_active = F[np.setdiff1d(existDof,[0,1,2]),:]
-     
+    
+    
     # ! ---solve U matrix------
     stime = time.time()
 
@@ -162,7 +172,7 @@ if __name__=="__main__":
     C0 = []
     voxel = []
 
-    mesh_size= 40 # TODO modify this parameter
+    mesh_size= 10 # TODO modify this parameter
     # x,_ = read_stl(mesh_size,filename,4, True, num_cores = 16)
     # x[np.where(x>0)] = 1
     x = np.ones((mesh_size, mesh_size, mesh_size))*0.3
