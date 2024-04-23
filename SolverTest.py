@@ -123,7 +123,7 @@ def homogenization3d(mesh_size,C0,x,voxel):
 
     with open('b.txt','w') as f:
         for index in range(len(iF)):
-            f.write('%d %.8f\n'%(iF[index],sF[index]))
+            f.write('%d %d %.8f\n'%(iF[index],jF[index],sF[index]))
             
     F = sparse.csc_matrix((sF,(iF,jF)),shape=((3*nele,6)),dtype=np.float32)
     U = np.zeros((ndof,6))
@@ -135,10 +135,11 @@ def homogenization3d(mesh_size,C0,x,voxel):
     stime = time.time()
 
     import linalg_solve_moudle as ls
-    U_result = ls.linalg_solve(K_active,F_active,np.zeros((ndof-3,6)))
-
+    U_result = ls.linalg_solve(K_active,F_active)
+    
 
     print("Solver time costing: ", time.time()-stime)
+    np.savetxt('U.txt', U_result)
     U[np.setdiff1d(existDof,[0,1,2]),:] = U_result
 
     Ue = np.zeros((len(Ke),24,6))
