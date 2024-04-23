@@ -6,6 +6,8 @@ import time
 import vtkmodules.all as vtk
 import multiprocessing as mp
 import os
+import RelatedFunctions as rf
+
 
 """
 E is base materials modulus of elasticity;
@@ -105,14 +107,11 @@ def homogenization3d(mesh_size,C0,x,voxel):
         sK = sK +np.reshape(np.dot(np.reshape(Ke[i],(24*24,1)),Emin+np.reshape(x_current[existEle]**3,(-1,1)).T*(E0-Emin)).T,(-1))
 
     print(len(iK))
-    with open('A.txt','w') as f:
-        f.write('%d %d %d\n'%(3*nele,3*nele,len(iK)))
-        for index in range(len(iK)):
-            f.write('%d %d %.8f\n'%(iK[index],jK[index],sK[index]))
+    
 
     K = sparse.csc_matrix((sK,(iK,jK)),shape=(3*nele,3*nele),dtype=np.float32)
     K = (K+K.T)/2 
-
+    print(K[0,0])
     iF = edofMat.reshape((-1)).tolist()*6
     jF = np.hstack(([0]*24*len(existEle[0]),[1]*24*len(existEle[0]),[2]*24*len(existEle[0]),[3]*24*len(existEle[0]),[4]*24*len(existEle[0]),[5]*24*len(existEle[0])))
     sF = np.zeros(len(iF))
@@ -123,13 +122,26 @@ def homogenization3d(mesh_size,C0,x,voxel):
 
     with open('b.txt','w') as f:
         for index in range(len(iF)):
-            f.write('%d %d %.8f\n'%(iF[index],jF[index],sF[index]))
+            f.write('%d %d %.16f\n'%(iF[index],jF[index],sF[index]))
             
     F = sparse.csc_matrix((sF,(iF,jF)),shape=((3*nele,6)),dtype=np.float32)
+    
     U = np.zeros((ndof,6))
     K_active = K[np.setdiff1d(existDof,[0,1,2]),:][:,np.setdiff1d(existDof,[0,1,2])]
     F_active = F[np.setdiff1d(existDof,[0,1,2]),:]
     
+    # with open('A.txt','w') as f:
+    #     f.write('%d %d %d\n'%(K_active.shape[0],K_active.shape[1],np.sum(K_active.todense()!=0)))
+    #     for index1 in range(K_active.shape[0]):
+    #         for index2 in range(K_active.shape[1]):
+    #             if K_active[index1,index2]!=0:
+    #                 f.write('%d %d %.16f\n'%(index1,index2,K_active[index1,index2]))
+    
+    with open('b.txt','w') as f:
+        for j in range(6):
+            for index in range(F_active.shape[0]):
+                f.write('%d %d %.16f\n'%(index,j,F_active[index,j]))
+    np.savetxt('F.txt',F_active.todense())                    
     
     # ! ---solve U matrix------
     stime = time.time()
@@ -139,9 +151,9 @@ def homogenization3d(mesh_size,C0,x,voxel):
     
 
     print("Solver time costing: ", time.time()-stime)
-    np.savetxt('U.txt', U_result)
+    
     U[np.setdiff1d(existDof,[0,1,2]),:] = U_result
-
+    np.savetxt('U.txt', U_result)
     Ue = np.zeros((len(Ke),24,6))
     indexe = np.hstack(([3],[6],[7],[12],[9],[10],[11],list(range(13,24))))
     for i in range(len(Ke)):
@@ -174,10 +186,11 @@ if __name__=="__main__":
     voxel = []
 
     mesh_size= 10 # TODO modify this parameter
-    # x,_ = read_stl(mesh_size,filename,4, True, num_cores = 16)
+    x,_ = rf.TPMS2Mesh(mesh_size,1,rf.get_TPMS_func('Strut G'),0)
     # x[np.where(x>0)] = 1
-    x = np.ones((mesh_size, mesh_size, mesh_size))*0.3
+    # x = np.ones((mesh_size, mesh_size, mesh_size))*0.3
     # x[mesh_size//4:3*mesh_size//4, mesh_size//4:3*mesh_size//4, mesh_size//4:3*mesh_size//4] = 0.3/3
+    print(np.max(x))
     stime = time.time() 
     E = 1
     nu = 0.3
