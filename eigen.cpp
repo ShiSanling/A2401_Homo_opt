@@ -33,7 +33,7 @@ Eigen::MatrixXf linalg_solve(SpMat A_mat,SpMat B_mat)
 {
 	Eigen::initParallel();
 	Eigen::ConjugateGradient<SpMat> solver(A_mat);
-  solver.setMaxIterations(1000);
+  // solver.setMaxIterations(1000);
   solver.setTolerance(1e-6);
   Eigen::MatrixXf x = solver.solve(MatrixXf(B_mat));
 	return x;

@@ -29,7 +29,7 @@ Mat Get_A(char *Ain)
     // printf("\nThis is process %d reading from %d to %d ...\n",rank,rstart,rend-1);
     for (int i = 0; i < nz; i++)
     {
-        fscanf(Afile, "%d %d %le\n", &row, &col, (double *)&val);
+        fscanf(Afile, "%d %d %lf\n", &row, &col, (double *)&val);
         if (row >= rstart && row < rend)
             ierr = MatSetValues(A, 1, &row, 1, &col, &val, ADD_VALUES);
     }
@@ -167,6 +167,13 @@ int main(int argc, char **args)
         VecGetSize(b, &sizeB);
 
         PetscCall(KSPSolve(ksp, b, x));
+        Vec y;
+        VecDuplicate(x, &y);
+        MatMult(A, x, y);
+
+        const char y_filename[10] = "y_vec.txt";
+        Write_Vec(y, y_filename);
+
         const char b_filename[10] = "b_vet.txt";
         Write_Vec(b, b_filename);
         std::string filename = "output"+std::to_string(idx)+".txt";

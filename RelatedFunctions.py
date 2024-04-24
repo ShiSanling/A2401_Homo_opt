@@ -9,6 +9,7 @@ import math
 from scipy import optimize
 import scipy
 import random
+import MicroAnalysisV5 as micro
 from vtkmodules.vtkFiltersCore import vtkContourFilter
 from vtkmodules.vtkFiltersHybrid import vtkImplicitModeller
 from vtkmodules.vtkIOLegacy import vtkPolyDataReader
