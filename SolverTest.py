@@ -7,7 +7,10 @@ import vtkmodules.all as vtk
 import multiprocessing as mp
 import os
 import RelatedFunctions as rf
-
+import sys
+import petsc4py
+from petsc4py import PETSc
+petsc4py.init(sys.argv)
 
 """
 E is base materials modulus of elasticity;
@@ -56,7 +59,28 @@ def calc_KeFe(C0_s, length_x, length_y, length_z):
 
     return [Kes,Fes,Bs]
 
-  
+
+def linalg_solve_petsc(K, F):
+    comm = PETSc.COMM_WORLD
+
+    K_petsc = PETSc.Mat().createAIJ(size=K.shape, csr=(K.indptr, K.indices, K.data))
+    F_petsc = PETSc.Mat().createAIJ(size=F.shape, csr=(F.indptr, F.indices, F.data))
+    # F_petsc = PETSc.Mat().createDense(F.todense())
+    x_petsc = PETSc.Mat().createDense(F.todense().shape)
+    
+    # x_petsc = PETSc.Vec().create(comm=comm)
+    # x_petsc.setSizes(K_petsc.getSize()[0])
+    # x_petsc.setFromOptions()
+    
+    ksp = PETSc.KSP().create(comm)
+    ksp.setType(PETSc.KSP.Type.CG)
+    ksp.getPC().setType(PETSc.PC.Type.JACOBI)
+    ksp.setOperators(K_petsc)
+    ksp.getPC().setOperators(K_petsc)
+    ksp.setTolerances(rtol=1.e-6)
+     
+    ksp.solve(F_petsc, x_petsc)
+    return x_petsc
 
 """
 mesh_size is the number of elements divided on a single axis;
@@ -106,13 +130,13 @@ def homogenization3d(mesh_size,C0,x,voxel):
         x_current[np.where(voxel!=i)]=0
         sK = sK +np.reshape(np.dot(np.reshape(Ke[i],(24*24,1)),Emin+np.reshape(x_current[existEle]**3,(-1,1)).T*(E0-Emin)).T,(-1))
 
-    print(len(iK))
-    with open('A.txt','w') as f:
-        f.write('%d %d %d\n'%(3*nele,3*nele,len(iK)))
-        for index in range(len(iK)):
-            f.write('%d %d %.16f\n'%(iK[index],jK[index],sK[index]))
+    # print(len(iK))
+    # with open('A.txt','w') as f:
+    #     f.write('%d %d %d\n'%(3*nele,3*nele,len(iK)))
+    #     for index in range(len(iK)):
+    #         f.write('%d %d %.16f\n'%(iK[index],jK[index],sK[index]))
 
-    K = sparse.csc_matrix((sK,(iK,jK)),shape=(3*nele,3*nele),dtype=np.float32)
+    K = sparse.csr_matrix((sK,(iK,jK)),shape=(3*nele,3*nele),dtype=np.float32)
     K = (K+K.T)/2 
     print(K[0,0])
     iF = edofMat.reshape((-1)).tolist()*6
@@ -124,12 +148,12 @@ def homogenization3d(mesh_size,C0,x,voxel):
         sF = sF + np.array(np.kron((x_current[existEle]**3).reshape(-1,1),Fe[i]).T.reshape((1,-1)))[0]
 
 
-    with open('b.txt','w') as f:
-        f.write('%d %d\n'%(3*nele,len(iF)))
-        for index in range(len(iF)):
-            f.write('%d %d %.16f\n'%(iF[index],jF[index],sF[index]))
+    # with open('b.txt','w') as f:
+    #     f.write('%d %d\n'%(3*nele,len(iF)))
+    #     for index in range(len(iF)):
+    #         f.write('%d %d %.16f\n'%(iF[index],jF[index],sF[index]))
             
-    F = sparse.csc_matrix((sF,(iF,jF)),shape=((3*nele,6)),dtype=np.float32)
+    F = sparse.csr_matrix((sF,(iF,jF)),shape=((3*nele,6)),dtype=np.float32)
     
     U = np.zeros((ndof,6))
     K_active = K[np.setdiff1d(existDof,[0,1,2]),:][:,np.setdiff1d(existDof,[0,1,2])]
@@ -152,13 +176,13 @@ def homogenization3d(mesh_size,C0,x,voxel):
     stime = time.time()
 
     import linalg_solve_moudle as ls
-    U_result = ls.linalg_solve(K_active,F_active)
-    
+    # U_result = ls.linalg_solve(K_active,F_active)
+    U_result = linalg_solve_petsc(K_active, F_active)
 
     print("Solver time costing: ", time.time()-stime)
     
     U[np.setdiff1d(existDof,[0,1,2]),:] = U_result
-    np.savetxt('U.txt', U)
+    # np.savetxt('U.txt', U)
     Ue = np.zeros((len(Ke),24,6))
     indexe = np.hstack(([3],[6],[7],[12],[9],[10],[11],list(range(13,24))))
     for i in range(len(Ke)):
@@ -190,7 +214,7 @@ if __name__=="__main__":
     C0 = []
     voxel = []
 
-    mesh_size= 10 # TODO modify this parameter
+    mesh_size= 40 # TODO modify this parameter
     x,_ = rf.TPMS2Mesh(mesh_size,1,rf.get_TPMS_func('Strut G'),0)
     # x[np.where(x>0)] = 1
     # x = np.ones((mesh_size, mesh_size, mesh_size))*0.3
