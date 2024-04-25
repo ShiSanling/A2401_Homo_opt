@@ -107,7 +107,10 @@ def homogenization3d(mesh_size,C0,x,voxel):
         sK = sK +np.reshape(np.dot(np.reshape(Ke[i],(24*24,1)),Emin+np.reshape(x_current[existEle]**3,(-1,1)).T*(E0-Emin)).T,(-1))
 
     print(len(iK))
-    
+    with open('A.txt','w') as f:
+        f.write('%d %d %d\n'%(3*nele,3*nele,len(iK)))
+        for index in range(len(iK)):
+            f.write('%d %d %.16f\n'%(iK[index],jK[index],sK[index]))
 
     K = sparse.csc_matrix((sK,(iK,jK)),shape=(3*nele,3*nele),dtype=np.float32)
     K = (K+K.T)/2 
@@ -120,7 +123,9 @@ def homogenization3d(mesh_size,C0,x,voxel):
         x_current[np.where(voxel!=i)]=0
         sF = sF + np.array(np.kron((x_current[existEle]**3).reshape(-1,1),Fe[i]).T.reshape((1,-1)))[0]
 
+
     with open('b.txt','w') as f:
+        f.write('%d %d\n'%(3*nele,len(iF)))
         for index in range(len(iF)):
             f.write('%d %d %.16f\n'%(iF[index],jF[index],sF[index]))
             
@@ -137,11 +142,11 @@ def homogenization3d(mesh_size,C0,x,voxel):
     #             if K_active[index1,index2]!=0:
     #                 f.write('%d %d %.16f\n'%(index1,index2,K_active[index1,index2]))
     
-    with open('b.txt','w') as f:
-        for j in range(6):
-            for index in range(F_active.shape[0]):
-                f.write('%d %d %.16f\n'%(index,j,F_active[index,j]))
-    np.savetxt('F.txt',F_active.todense())                    
+    # with open('b.txt','w') as f:
+    #     for j in range(6):
+    #         for index in range(F_active.shape[0]):
+    #             f.write('%d %d %.16f\n'%(index,j,F_active[index,j]))
+    # np.savetxt('F.txt',F_active.todense())                    
     
     # ! ---solve U matrix------
     stime = time.time()
@@ -153,7 +158,7 @@ def homogenization3d(mesh_size,C0,x,voxel):
     print("Solver time costing: ", time.time()-stime)
     
     U[np.setdiff1d(existDof,[0,1,2]),:] = U_result
-    np.savetxt('U.txt', U_result)
+    np.savetxt('U.txt', U)
     Ue = np.zeros((len(Ke),24,6))
     indexe = np.hstack(([3],[6],[7],[12],[9],[10],[11],list(range(13,24))))
     for i in range(len(Ke)):

@@ -41,11 +41,11 @@ Mat Get_A(char *Ain)
     fclose(Afile);
     return A;
 }
-Vec Get_B(char *rhs, int col, int n)
+Vec Get_B(char *rhs, int col)
 {
     Vec b;
     PetscErrorCode ierr;
-    int dummy, bindex;
+    int dummy, bindex, n, nz;
     PetscInt rstart1, rend1;
     PetscScalar val;
     FILE *bfile;
@@ -55,14 +55,16 @@ Vec Get_B(char *rhs, int col, int n)
     std::streambuf *coutbuf = std::cout.rdbuf(); // 保存 std::cout 的缓冲区指针
     std::cout.rdbuf(file.rdbuf()); // 将文件的缓冲区指针绑定到 std::cout
 
+    bfile = fopen(rhs, "r");
+    fscanf(bfile, "%d %d\n", &n, &nz);
     ierr = VecCreate(PETSC_COMM_WORLD, &b);
     ierr = VecSetSizes(b, PETSC_DECIDE, n);
     ierr = VecSetFromOptions(b);
     ierr = VecGetOwnershipRange(b, &rstart1, &rend1);
 
     // printf("\nThis is process %d reading from %d to %d ...\n",rank,rstart1,rend1-1);
-    bfile = fopen(rhs, "r");
-    for (int i = 0; i < 13050; i++)
+
+    for (int i = 0; i < nz; i++)
     {
         fscanf(bfile, "%d %d %lf\n", &dummy, &bindex, (double *)&val);
         // std::cout<<dummy<<" "<<val<<" "<<bindex<<" "<<col<<std::endl;
@@ -157,9 +159,9 @@ int main(int argc, char **args)
     PetscTime(&end_time);
     time = end_time - start_time;
     PetscPrintf(PETSC_COMM_WORLD, "\n%-15s%-7.5f seconds\n", "time:", time);
-    for(int idx=0;idx<1;idx++)
+    for(int idx=0;idx<6;idx++)
     {
-        b = Get_B(rhs, idx, 2175);
+        b = Get_B(rhs, idx);
         PetscCall(VecDuplicate(b, &x));
         PetscInt numRowsA, numColsA;
         MatGetSize(A, &numRowsA, &numColsA);  

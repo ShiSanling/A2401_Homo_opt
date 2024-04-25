@@ -8,7 +8,7 @@ linalg_solve_moudle = Extension(
 #     extra_compile_args=[" -openmp"],
     sources=['eigen.cpp'],
     include_dirs=[  '/usr/include/eigen3',
-                    '/usr/local/include/pybind11'],
+                    '/home/topjournals/.local/include'],
 
               )
 
