@@ -1,2 +1,7 @@
 /linalg_solve_moudle.cp310-win_amd64.pyd
 /linalg_solve_moudle.cp39-win_amd64.pyd
+
+__pycache__/
+log/
+build/
+*.txt
