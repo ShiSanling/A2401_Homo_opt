@@ -8,9 +8,11 @@ import multiprocessing as mp
 import os
 import RelatedFunctions as rf
 import sys
-import petsc4py
-from petsc4py import PETSc
-petsc4py.init(sys.argv)
+# import petsc4py
+# from petsc4py import PETSc
+# petsc4py.init(sys.argv)
+import cupy as cp
+from numba import cuda
 
 """
 E is base materials modulus of elasticity;
@@ -81,6 +83,45 @@ def linalg_solve_petsc(K, F):
      
     ksp.solve(F_petsc, x_petsc)
     return x_petsc
+
+
+from cupyx.scipy.sparse.linalg import cg
+@cuda.jit
+def cg_solver_kernel(K_gpu_data, K_gpu_indices, K_gpu_indptr, F_gpu_data, x_gpu_data, n, tol):
+    i = cuda.grid(1)
+    if i < n:
+        x_gpu_data[i] = cg(K_gpu_data, K_gpu_indices, K_gpu_indptr, F_gpu_data[i], tol=tol)[0]
+
+
+def linalg_solve_gpu(K, F):
+    K_gpu = cp.sparse.csc_matrix(K)
+    K_gpu_data = K_gpu.data.get()
+    K_gpu_indices = K_gpu.indices.get()
+    K_gpu_indptr = K_gpu.indptr.get()
+    
+    F_gpu = cp.asarray(F.todense())
+    n = F.shape[1]
+    x_all = cp.zeros(F.shape, dtype=cp.float32)
+    
+    threads_per_block = 256
+    blocks_per_grid = (n + threads_per_block - 1) // threads_per_block
+    
+    cg_solver_kernel[blocks_per_grid, threads_per_block](K_gpu_data, K_gpu_indices, K_gpu_indptr, F_gpu, x_all, n, 1e-5)
+    
+    return x_all.get()
+
+
+# from cupyx.scipy.sparse.linalg import cg
+# def linalg_solve_gpu(K, F):
+#     K_gpu = cupy.sparse.csc_matrix(K)
+#     x_all = np.zeros(F.shape)
+#     stime = time.time()
+#     for i in range(6):
+#         F_gpu = cupy.asarray(F[:,i].todense())
+#         x_gpu = cg(K_gpu, F_gpu,tol=1e-5,callback=lambda *args: None)
+#         x_all[:,i] = cupy.asnumpy(x_gpu[0])
+#         print(time.time()-stime)
+#     return x_all
 
 """
 mesh_size is the number of elements divided on a single axis;
@@ -177,7 +218,7 @@ def homogenization3d(mesh_size,C0,x,voxel):
 
     import linalg_solve_moudle as ls
     # U_result = ls.linalg_solve(K_active,F_active)
-    U_result = linalg_solve_petsc(K_active, F_active)
+    U_result = linalg_solve_gpu(K_active, F_active)
 
     print("Solver time costing: ", time.time()-stime)
     
@@ -214,7 +255,7 @@ if __name__=="__main__":
     C0 = []
     voxel = []
 
-    mesh_size= 40 # TODO modify this parameter
+    mesh_size= 80 # TODO modify this parameter
     x,_ = rf.TPMS2Mesh(mesh_size,1,rf.get_TPMS_func('Strut G'),0)
     # x[np.where(x>0)] = 1
     # x = np.ones((mesh_size, mesh_size, mesh_size))*0.3
