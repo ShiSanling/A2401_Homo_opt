@@ -1,32 +1,66 @@
-import vtk
-import pyvista as pv
-import numpy as np
+import cv2
+from numba import cuda
 import time
-import MicroAnalysisV5 as micro
-import RelatedFunctions as rf
+import math
+import numpy as np
+# GPU function
+@cuda.jit()
+def process_gpu(img):
+    tx = cuda.blockIdx.x * cuda.blockDim.x + cuda.threadIdx.x
+    ty = cuda.blockIdx.y * cuda.blockDim.y + cuda.threadIdx.y
+    for channel in range(3):
+        color = img[tx, ty][channel] * 2.0 + 30
+        if color > 255:
+            img[tx, ty][channel] = 255
+        elif color < 0:
+            img[tx, ty][channel] = 0
+        else:
+            img[tx, ty][channel] = color
+
+
+# CPU function
+def process_cpu(img, dst):
+    height, width, channels = img.shape
+    for h in range(height):
+        for w in range(width):
+            for c in range(channels):
+                color = img[h, w][c] * 2.0 + 30
+                if color > 255:
+                    dst[h, w][c] = 255
+                elif color < 0:
+                    dst[h, w][c] = 0
+                else:
+                    dst[h, w][c] = color
+
 
 if __name__ == '__main__':
-    # multi-material
-    C0 = []
+    img = np.zeros((100,100,3))
+    height, width, channels = img.shape
 
-    mesh_size= 10 # TODO modify this parameter
-    x,_ = rf.TPMS2Mesh(mesh_size,1,rf.get_TPMS_func('Strut G'),0)
-    # x[np.where(x>0)] = 1
-    # x = np.ones((mesh_size, mesh_size, mesh_size))*0.3
-    # x[mesh_size//4:3*mesh_size//4, mesh_size//4:3*mesh_size//4, mesh_size//4:3*mesh_size//4] = 0.3/3
-    print(np.max(x))
-    stime = time.time()
-    E = 1
-    nu = 0.3
-    C0 = E*1.0/((1+nu)*(1-2*nu))*np.array([[1-nu,nu,nu,0,0,0],[nu,1-nu,nu,0,0,0],[nu,nu,1-nu,0,0,0],[0,0,0,(1-2*nu)/2,0,0],[0,0,0,0,(1-2*nu)/2,0],[0,0,0,0,0,(1-2*nu)/2]])
-    voxel = np.zeros((mesh_size,mesh_size,mesh_size))
-    CH = micro.homogenization3d(mesh_size, [C0], x, voxel)
-    # KH = homogenization3d_thermal(mesh_size,k0,x)
-    # RelatedFunctions.elastic_modulus_visualization2d(CH)
-    # np.save("CH.npy",CH)
-    S = np.linalg.inv(CH)
-    EH = 1/S[0,0]
-    GH = 1/S[3,3]
-    nuH = -S[0,1]/S[0,0]
-    AH = 2*CH[3,3]/(CH[0,0]-CH[0,1])
-    print("mesh_size %f time_costing:"%mesh_size,time.time()-stime,EH)
+    dst_cpu = img.copy()
+    start_cpu = time.time()
+    process_cpu(img, dst_cpu)
+    end_cpu = time.time()
+    time_cpu = (end_cpu - start_cpu)
+    print("CPU process time: " + str(time_cpu))
+
+    ##GPU function
+    dImg = cuda.to_device(img)
+    threadsperblock = (32, 32)
+    blockspergrid_x = int(math.ceil(height / threadsperblock[0]))
+    blockspergrid_y = int(math.ceil(width / threadsperblock[1]))
+    blockspergrid = (blockspergrid_x, blockspergrid_y)
+
+    cuda.synchronize()
+    start_gpu = time.time()
+    process_gpu[blockspergrid, threadsperblock](dImg)
+    end_gpu = time.time()
+    cuda.synchronize()
+    time_gpu = (end_gpu - start_gpu)
+    print("GPU process time: " + str(time_gpu))
+    dst_gpu = dImg.copy_to_host()
+
+    # save
+    cv2.imwrite("result_cpu.jpg", dst_cpu)
+    cv2.imwrite("result_gpu.jpg", dst_gpu)
+    print("Done.")
