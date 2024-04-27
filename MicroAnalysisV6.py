@@ -408,13 +408,13 @@ def homogenization3d(mesh_size, C0, x, voxel = None, Device = 'cpu'):
     U = np.zeros((ndof,6))
     #---solve U matrix------
     stime = time.time()
-    if Device == 'CPU':
+    if Device == 'cpu':
         if sys.platform == 'win32':
             import linalg_solve_moudle as ls
         if sys.platform == 'linux':
             import linalg_solve_moudle as ls
         U[np.setdiff1d(existDof,[0,1,2]),:] = ls.linalg_solve(K[np.setdiff1d(existDof,[0,1,2]),:][:,np.setdiff1d(existDof,[0,1,2])],F[np.setdiff1d(existDof,[0,1,2]),:])
-    else:
+    elif Device == 'gpu':
         U[np.setdiff1d(existDof, [0, 1, 2]), :] = linalg_solve_gpu(K[np.setdiff1d(existDof, [0, 1, 2]), :][:, np.setdiff1d(existDof, [0, 1, 2])], F[np.setdiff1d(existDof, [0, 1, 2]), :].todense())
     # print(time.time()-stime)
 
