@@ -283,7 +283,7 @@ if __name__=="__main__":
     C0 = []
     voxel = []
 
-    mesh_size= 160 # TODO modify this parameter
+    mesh_size= 160  # ! modify this parameter
     x,_ = rf.TPMS2Mesh(mesh_size,1,rf.get_TPMS_func('Strut G'),0)
     print("voxel number:", np.sum(x))
     # x[np.where(x>0)] = 1
