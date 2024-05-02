@@ -12,7 +12,7 @@ Date = 2024.04.27
 from importlib.metadata import distribution
 import numpy as np
 from scipy import sparse
-import time 
+import time
 import vtkmodules.all as vtk
 import multiprocessing as mp
 import os
@@ -72,19 +72,27 @@ def linalg_solve_gpu(K, F):
     x_all = np.zeros(F.shape)
     stime = time.time()
     streams = [cp.cuda.Stream() for _ in range(6)]  # 创建 6 个流
+    events = [None] * F.shape[1]
+
     for i in range(6):
         with streams[i]:
             F_gpu = cp.asarray(F[:,i])
             x_gpu = cg(K_gpu, F_gpu,tol=1e-5,callback=lambda *args: None)
-            x_all[:,i] = cp.asnumpy(x_gpu[0])
-        # print(time.time()-stime)
+            events[i] = cp.cuda.Event()
+            events[i].record(streams[i])
+            cp.cuda.stream.get_current_stream().synchronize()
+            x_all[:, i] = x_gpu[0].get()
+
+    for i in range(F.shape[1]):
+        events[i].synchronize()  # Wait for each column to finish
+    print(time.time()-stime)
     return x_all
 
 
 def calc_KeFe_thermal(k0, length_x, length_y, length_z):
     #C0 is the elasticity tensor of base materials, which is isotropic
     # C0 = E*1.0/((1+nu)*(1-2*nu))*np.array([[1-nu,nu,nu,0,0,0],[nu,1-nu,nu,0,0,0],[nu,nu,1-nu,0,0,0],[0,0,0,(1-2*nu)/2,0,0],[0,0,0,0,(1-2*nu)/2,0],[0,0,0,0,0,(1-2*nu)/2]])
-    
+
     coordinates = [[-length_x/2,-length_y/2,-length_z/2],[length_x/2,-length_y/2,-length_z/2],[length_x/2,length_y/2,-length_z/2],[-length_x/2,length_y/2,-length_z/2],[-length_x/2,-length_y/2,length_z/2],[length_x/2,-length_y/2,length_z/2],[length_x/2,length_y/2,length_z/2],[-length_x/2,length_y/2,length_z/2]]
     GaussPoint = [-1/np.sqrt(3),1/np.sqrt(3)]
     Ke = np.zeros((8,8))
@@ -101,7 +109,7 @@ def calc_KeFe_thermal(k0, length_x, length_y, length_z):
 
 def read_stl_part(mesh_size,filename, list_range, small_mesh_size=4,set_bound = 0):
     # x is the volume fraction on each element.
-    
+
     stime = time.time()
     reader = vtk.vtkSTLReader()
     reader.SetFileName(filename)
@@ -156,7 +164,7 @@ def read_stl_part(mesh_size,filename, list_range, small_mesh_size=4,set_bound = 
     results = []
     for idx in list_range:
         current_center = center_points.GetPoint(idx) #(point_x, point_y, point_z )
-        
+
         distance = sdf.FunctionValue(current_center)
         # distance_sdf.InsertNextValue(distance*(mesh_size/(bounds[1])))
         if distance > np.linalg.norm(mesh_pitch)/2:
@@ -169,13 +177,13 @@ def read_stl_part(mesh_size,filename, list_range, small_mesh_size=4,set_bound = 
             for index in range(small_mesh_size**3):
                 if sdf.FunctionValue(mesh_point[index])<0:
                     value = value + 1
-            value =value/(small_mesh_size**3)    
+            value =value/(small_mesh_size**3)
         results.append(value)
     return results
 
 def read_stl_implicit(mesh_size,filename, list_range, small_mesh_size=4,set_bound = 0):
     # x is the volume fraction on each element.
-    
+
     stime = time.time()
     reader = vtk.vtkSTLReader()
     reader.SetFileName(filename)
@@ -241,7 +249,7 @@ def read_stl_implicit(mesh_size,filename, list_range, small_mesh_size=4,set_boun
             for index in range(small_mesh_size**3):
                 if sdf.FunctionValue(mesh_point[index])<0:
                     value = value + 1
-            value =value/(small_mesh_size**3)    
+            value =value/(small_mesh_size**3)
         results.append(value)
     return results
 
@@ -250,7 +258,7 @@ mesh_size is the number of elements divided on a single axis;
 small_mesh_size is the number of elements divided on a single axis of the resampled elements;
 filename is the file path of the lattice model.
 """
-def read_stl(mesh_size, filename,set_bound=0, small_mesh_size=4, save_vtkfile = False, num_cores=1): 
+def read_stl(mesh_size, filename,set_bound=0, small_mesh_size=4, save_vtkfile = False, num_cores=1):
     num_cores = min(num_cores,int(mp.cpu_count()))
     pool = mp.Pool(num_cores)
     pitch =  np.ceil(mesh_size**3/num_cores).astype(int)
@@ -304,7 +312,7 @@ def read_stl(mesh_size, filename,set_bound=0, small_mesh_size=4, save_vtkfile = 
             if x[idx//(mesh_size**2),idx//mesh_size%mesh_size,idx%mesh_size] !=0:
                 cell_list.InsertNextId(idx)
             x_volfrac.InsertNextValue(x[idx//(mesh_size**2),idx//mesh_size%mesh_size,idx%mesh_size])
-                
+
 
         base_mesh.GetCellData().SetScalars(x_volfrac)
         extract_cells = vtk.vtkExtractCells()
@@ -324,7 +332,7 @@ def read_stl(mesh_size, filename,set_bound=0, small_mesh_size=4, save_vtkfile = 
         vtk_filename =""
 
     return x,vtk_filename
-    
+
 
 """
 mesh_size is the number of elements divided on a single axis;
@@ -360,7 +368,7 @@ def homogenization3d(mesh_size, C0, x, voxel = None, Device = 'cpu'):
     fixMat = np.zeros((nele,24))
     for i in range(nele-nelx*nely,nele,1):
         fixMat[i,12:24] = fixMat[i,12:24]-nele*3
-    edofMat = edofMat + fixMat 
+    edofMat = edofMat + fixMat
     edofMat = edofMat.astype(np.int32)
     existEle = np.where(x>0)
     edofMat_ = edofMat
@@ -373,7 +381,7 @@ def homogenization3d(mesh_size, C0, x, voxel = None, Device = 'cpu'):
     # nodeids = np.vstack((nodeids,nodeids[0,:]))
     # nodeidz = np.hstack((range(0,(nelz-1)*nely*nelx+1,nely*nelx),[0]))
     # for i in range(nelz+1):
-    #     nodeid[i] = nodeids +nodeidz[i] 
+    #     nodeid[i] = nodeids +nodeidz[i]
     # for i in range(nele):
     #     grdz = i//(nelx*nely)
     #     grdzs = np.repeat([grdz,grdz+1],4)
@@ -383,7 +391,7 @@ def homogenization3d(mesh_size, C0, x, voxel = None, Device = 'cpu'):
     #     grdys = np.hstack(([grdy,grdy,grdy+1,grdy+1],[grdy,grdy,grdy+1,grdy+1]))
     #     edofMat2[i,:] = 3*np.repeat(nodeid[grdzs,nely-grdys,grdxs],3) + np.kron([1]*8,[0,1,2])
     # print(np.sum(edofMat2-edofMat))
-    
+
     iK = np.reshape(np.kron(edofMat,np.ones((24,1))),(-1))
     jK = np.reshape(np.kron(edofMat,np.ones((1,24))),(-1))
     sK = np.zeros(len(iK))
@@ -394,7 +402,7 @@ def homogenization3d(mesh_size, C0, x, voxel = None, Device = 'cpu'):
 
 
     K = sparse.csc_matrix((sK,(iK,jK)),shape=(3*nele,3*nele),dtype=np.float32)
-    K = (K+K.T)/2 
+    K = (K+K.T)/2
 
     iF = edofMat.reshape((-1)).tolist()*6
     jF = np.hstack(([0]*24*len(existEle[0]),[1]*24*len(existEle[0]),[2]*24*len(existEle[0]),[3]*24*len(existEle[0]),[4]*24*len(existEle[0]),[5]*24*len(existEle[0])))
@@ -421,13 +429,13 @@ def homogenization3d(mesh_size, C0, x, voxel = None, Device = 'cpu'):
     Ue = np.zeros((len(Ke),24,6))
     indexe = np.hstack(([3],[6],[7],[12],[9],[10],[11],list(range(13,24))))
     for i in range(len(Ke)):
-        Ue[i,indexe] = np.linalg.solve(Ke[i][indexe,:][:,indexe],Fe[i][indexe]) 
+        Ue[i,indexe] = np.linalg.solve(Ke[i][indexe,:][:,indexe],Fe[i][indexe])
     U0 = np.zeros((nele,24,6))
     for j in range(len(Ke)):
         current_Ele  = np.where((voxel == j) & (x > 0))
         for i in range(6):
             U0[current_Ele[0]*mesh_size**2+current_Ele[2]*mesh_size+nely-1-current_Ele[1],:,i]=Ue[j][:,i]
-    
+
     CH=np.zeros((6,6))
     for i in range(6):
         for j in range(6):
@@ -481,20 +489,20 @@ def homogenization3d_thermal(mesh_size,k0,x):
     fixMat = np.zeros((nele,8))
     for i in range(nele-nelx*nely,nele,1):
         fixMat[i,4:8] = fixMat[i,4:8]-nele
-    edofMat = edofMat + fixMat 
+    edofMat = edofMat + fixMat
     edofMat = edofMat.astype(np.int32)
     existEle = np.where(x>0)
     edofMat_ = edofMat
     edofMat = edofMat[existEle[0]*mesh_size**2+existEle[2]*mesh_size+nely-1-existEle[1]]
     existDof = np.unique(edofMat)
     x_line = x[existEle]
-    
+
     iK = np.reshape(np.kron(edofMat,np.ones((8,1))),(-1))
     jK = np.reshape(np.kron(edofMat,np.ones((1,8))),(-1))
     sK = np.reshape(np.dot(np.reshape(Ke,(8*8,1)),Emin+np.reshape(x_line,(-1,1)).T*(E0-Emin)).T,(-1))
 
     K = sparse.csc_matrix((sK,(iK,jK)),shape=(3*nele,3*nele),dtype=np.float32)
-    K = (K+K.T)/2 
+    K = (K+K.T)/2
     sF = np.array(np.kron(x_line.reshape(-1,1),Fe).T.reshape((1,-1)))[0]
     iF = edofMat.reshape((-1)).tolist()*3
     jF = np.hstack(([0]*8*len(existEle[0]),[1]*8*len(existEle[0]),[2]*8*len(existEle[0])))
@@ -511,7 +519,7 @@ def homogenization3d_thermal(mesh_size,k0,x):
 
     Ue = np.zeros((8,3))
     indexe = np.setdiff1d(np.arange(8),[0])
-    Ue[indexe] = np.linalg.solve(Ke[indexe,:][:,indexe],Fe[indexe]) 
+    Ue[indexe] = np.linalg.solve(Ke[indexe,:][:,indexe],Fe[indexe])
     U0 = np.zeros((nele,8,3))
     for i in range(3):
         U0[existEle[0]*mesh_size**2+existEle[2]*mesh_size+nely-1-existEle[1],:,i]=Ue[:,i]
@@ -521,18 +529,18 @@ def homogenization3d_thermal(mesh_size,k0,x):
             sum = np.multiply((U0[:,:,i]-U[edofMat_,i]).dot(Ke),(U0[:,:,j]-U[edofMat_,j]))
             sum = np.sum(sum,axis=1)
             KH[i,j] = 1/nele*np.sum(np.multiply(x_line,sum[existEle[0]*mesh_size**2+existEle[2]*mesh_size+nely-1-existEle[1]]))
-    
+
     return KH
 
 import RelatedFunctions as rf
 if __name__=="__main__":
     # filename = "./Unit_Cell_STLs/Octet-Truss.stl"
     # mesh_size= 60
-    # stime = time.time() 
+    # stime = time.time()
     # x,_ = read_stl(mesh_size,filename,4, True, num_cores = 16)
     # # x=np.ones((4,4,4))
     # # x=np.ones((mesh_size,mesh_size,mesh_size))
-    
+
     # print(time.time()-stime)
     # E = 1850e6
     # nu =0.3
@@ -558,7 +566,7 @@ if __name__=="__main__":
     # x[np.where(x>0)] = 1
     x = np.ones((mesh_size, mesh_size, mesh_size))*0.3
     # x[mesh_size//4:3*mesh_size//4, mesh_size//4:3*mesh_size//4, mesh_size//4:3*mesh_size//4] = 0.3/3
-    stime = time.time() 
+    stime = time.time()
     Es = [1, 1]
     nus = [0.3, 0.3]
     for i in range(len(Es)):

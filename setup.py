@@ -1,18 +1,28 @@
 from setuptools import setup
 import os
 from setuptools import Extension
+import sys
 os.environ["CC"] = "gcc"
 os.environ["CXX"] = "g++"
-linalg_solve_moudle = Extension(
-    name='linalg_solve_moudle',
-#     extra_compile_args=[" -openmp"],
-    sources=['eigen.cpp'],
-    include_dirs=[  '/usr/include/eigen3',
-                    '/home/topjournals/.local/include'],
 
-              )
+if sys.platform == 'linux':
+    linalg_solve_moudle = Extension(
+        name='linalg_solve_moudle',
+    #     extra_compile_args=[" -openmp"],
+        sources=['eigen.cpp'],
+        include_dirs=[  '/usr/include/eigen3',
+                        '/home/topjournals/.local/include'],)
+    setup(ext_modules=[linalg_solve_moudle])
 
-setup(ext_modules=[linalg_solve_moudle])
+elif sys.platform == 'win32':
+    linalg_solve_moudle = Extension(name='linalg_solve_moudle',
+                                    sources=['eigen.cpp'],
+                                    include_dirs=['D:\Program Files\eigen3.4',
+                                                  '.\env\Scripts',
+                                                  'D:\Anaconda3\envs\homo\Lib\site-packages\pybind11\include'])
+
+    setup(ext_modules=[linalg_solve_moudle])
+
 
 #compile use "python setup.py build_ext --inplace"
 """

@@ -13,6 +13,8 @@ import sys
 # petsc4py.init(sys.argv)
 import cupy as cp
 # from numba import cuda
+from joblib import Parallel, delayed
+
 
 """
 E is base materials modulus of elasticity;
@@ -120,12 +122,19 @@ def linalg_solve_gpu(K, F):
     x_all = np.zeros(F.shape)
     stime = time.time()
     streams = [cp.cuda.Stream() for _ in range(6)]  # 创建 6 个流
+    events = [None] * F.shape[1]
+
     for i in range(6):
         with streams[i]:
-            F_gpu = cp.asarray(F[:,i].todense())
+            F_gpu = cp.asarray(F[:,i])
             x_gpu = cg(K_gpu, F_gpu,tol=1e-5,callback=lambda *args: None)
-            x_all[:,i] = cp.asnumpy(x_gpu[0])
-        print(time.time()-stime)
+            events[i] = cp.cuda.Event()
+            events[i].record(streams[i])
+            cp.cuda.stream.get_current_stream().synchronize()
+            x_all[:, i] = x_gpu[0].get()
+
+    for i in range(F.shape[1]):
+        events[i].synchronize()  # Wait for each column to finish
     return x_all
 
 """
@@ -136,6 +145,7 @@ nu is base materials possion's radio;
 x is the volume fraction on each element.
 """
 def homogenization3d(mesh_size,C0,x,voxel):
+    num_cores = 16
     E0=1
     Emin = 1e-9
     [Ke,Fe,B]=calc_KeFe(C0,1,1,1)
@@ -168,6 +178,7 @@ def homogenization3d(mesh_size,C0,x,voxel):
     existDof = np.unique(edofMat)
     x_line = x[existEle]
 
+    stime = time.time()
     iK = np.reshape(np.kron(edofMat,np.ones((24,1))),(-1))
     jK = np.reshape(np.kron(edofMat,np.ones((1,24))),(-1))
     sK = np.zeros(len(iK))
@@ -175,16 +186,9 @@ def homogenization3d(mesh_size,C0,x,voxel):
         x_current = x.copy()
         x_current[np.where(voxel!=i)]=0
         sK = sK +np.reshape(np.dot(np.reshape(Ke[i],(24*24,1)),Emin+np.reshape(x_current[existEle]**3,(-1,1)).T*(E0-Emin)).T,(-1))
-
-    # print(len(iK))
-    # with open('A.txt','w') as f:
-    #     f.write('%d %d %d\n'%(3*nele,3*nele,len(iK)))
-    #     for index in range(len(iK)):
-    #         f.write('%d %d %.16f\n'%(iK[index],jK[index],sK[index]))
-
     K = sparse.csr_matrix((sK,(iK,jK)),shape=(3*nele,3*nele),dtype=np.float32)
-    K = (K+K.T)/2 
-    print(K[0,0])
+    K = (K+K.T)/2
+
     iF = edofMat.reshape((-1)).tolist()*6
     jF = np.hstack(([0]*24*len(existEle[0]),[1]*24*len(existEle[0]),[2]*24*len(existEle[0]),[3]*24*len(existEle[0]),[4]*24*len(existEle[0]),[5]*24*len(existEle[0])))
     sF = np.zeros(len(iF))
@@ -192,15 +196,10 @@ def homogenization3d(mesh_size,C0,x,voxel):
         x_current = x.copy()
         x_current[np.where(voxel!=i)]=0
         sF = sF + np.array(np.kron((x_current[existEle]**3).reshape(-1,1),Fe[i]).T.reshape((1,-1)))[0]
-
-
-    # with open('b.txt','w') as f:
-    #     f.write('%d %d\n'%(3*nele,len(iF)))
-    #     for index in range(len(iF)):
-    #         f.write('%d %d %.16f\n'%(iF[index],jF[index],sF[index]))
-            
     F = sparse.csr_matrix((sF,(iF,jF)),shape=((3*nele,6)),dtype=np.float32)
-    
+
+    print(time.time()-stime)
+
     U = np.zeros((ndof,6))
     K_active = K[np.setdiff1d(existDof,[0,1,2]),:][:,np.setdiff1d(existDof,[0,1,2])]
     F_active = F[np.setdiff1d(existDof,[0,1,2]),:]
@@ -223,7 +222,7 @@ def homogenization3d(mesh_size,C0,x,voxel):
 
     # import linalg_solve_moudle as ls
     # U_result = ls.linalg_solve(K_active,F_active)
-    U_result = linalg_solve_gpu(K_active, F_active)
+    U_result = linalg_solve_gpu(K_active, F_active.todense())
 
     print("Solver time costing: ", time.time()-stime)
     
@@ -238,20 +237,29 @@ def homogenization3d(mesh_size,C0,x,voxel):
         current_Ele  = np.where((voxel == j) & (x > 0))
         for i in range(6):
             U0[current_Ele[0]*mesh_size**2+current_Ele[2]*mesh_size+nely-1-current_Ele[1],:,i]=Ue[j][:,i]
-    
+    stime = time.time()
     CH=np.zeros((6,6))
+    results = Parallel(n_jobs=num_cores)(
+        delayed(compute_CH)(i, j, Ke, U0, U, edofMat_)
+        for i in range(6)
+        for j in range(6)
+    )
     for i in range(6):
         for j in range(6):
-            sumCH = 0
-            for k in range(len(Ke)):
-                current_Ele  = np.where((voxel == k) & (x > 0))
-                current_ELe_line = current_Ele[0]*mesh_size**2+current_Ele[2]*mesh_size+nely-1-current_Ele[1]
-                current_x_line = x[current_Ele]
-                sumCHi = np.multiply((U0[current_ELe_line,:,i]-U[edofMat_[current_ELe_line],i]).dot(Ke[k]),(U0[current_ELe_line,:,j]-U[edofMat_[current_ELe_line],j]))
-                sumCHi = np.sum(sumCHi,axis=1)
-                sumCH = sumCH + np.sum(np.multiply(current_x_line,sumCHi))
-            CH[i,j] = 1/nele*sumCH
+            CH[i, j] = results[i * 6 + j]
+    print(time.time() - stime)
     return CH
+
+def compute_CH(i, j, Ke, U0, U, edofMat_):
+    sumCH = 0
+    for k in range(len(Ke)):
+        current_Ele  = np.where((voxel == k) & (x > 0))
+        current_ELe_line = current_Ele[0]*mesh_size**2+current_Ele[2]*mesh_size+mesh_size-1-current_Ele[1]
+        current_x_line = x[current_Ele]
+        sumCHi = np.multiply((U0[current_ELe_line,:,i]-U[edofMat_[current_ELe_line],i]).dot(Ke[k]),(U0[current_ELe_line,:,j]-U[edofMat_[current_ELe_line],j]))
+        sumCHi = np.sum(sumCHi,axis=1)
+        sumCH += np.sum(np.multiply(current_x_line,sumCHi))
+    return 1/(mesh_size**3)*sumCH
 
 if __name__=="__main__":
     
@@ -265,7 +273,6 @@ if __name__=="__main__":
     # x[np.where(x>0)] = 1
     # x = np.ones((mesh_size, mesh_size, mesh_size))*0.3
     # x[mesh_size//4:3*mesh_size//4, mesh_size//4:3*mesh_size//4, mesh_size//4:3*mesh_size//4] = 0.3/3
-    print(np.max(x))
     stime = time.time() 
     E = 1
     nu = 0.3
