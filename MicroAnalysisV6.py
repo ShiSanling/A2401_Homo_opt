@@ -17,6 +17,9 @@ import vtkmodules.all as vtk
 import multiprocessing as mp
 import os
 import sys
+from joblib import Parallel, delayed
+import cupy as cp
+from cupyx.scipy.sparse.linalg import cg
 
 """
 E is base materials modulus of elasticity;
@@ -65,8 +68,7 @@ def calc_KeFe(C0_s, length_x, length_y, length_z):
 
     return [Kes,Fes,Bs]
 
-import cupy as cp
-from cupyx.scipy.sparse.linalg import cg
+
 def linalg_solve_gpu(K, F):
     K_gpu = cp.sparse.csc_matrix(K)
     x_all = np.zeros(F.shape)
@@ -87,6 +89,61 @@ def linalg_solve_gpu(K, F):
         events[i].synchronize()  # Wait for each column to finish
     print(time.time()-stime)
     return x_all
+
+
+def compute_K(edofMat, Ke, x, voxel, existEle, Emin, E0, nele):
+    iK = np.tile(edofMat, 24).flatten()
+    jK = np.repeat(edofMat, 24).flatten()
+    sK = np.zeros(len(iK))
+
+    for i in range(len(Ke)):
+        x_current = x.copy()
+        x_current[np.where(voxel != i)] = 0
+        x_norm = (Emin + x_current[existEle]**3 * (E0 - Emin)).flatten()
+        sK += np.kron(x_norm, Ke[i].flatten())
+
+    K = sparse.csr_matrix((sK, (iK, jK)), shape=(3 * nele, 3 * nele), dtype=np.float32)
+    K = (K + K.T) / 2
+
+    return K
+
+def compute_K(edofMat, Ke, x, voxel, existEle, Emin, E0, nele):
+    iK = np.tile(edofMat, 24).flatten()
+    jK = np.repeat(edofMat, 24).flatten()
+    sK = np.zeros(len(iK))
+
+    x_current = x.copy()
+    x_current[np.where(voxel != 0)] = 0
+    x_norm = (Emin + x_current[existEle]**3 * (E0 - Emin)).flatten()
+    sK += np.kron(x_norm, Ke[0].flatten())
+
+    K = sparse.csr_matrix((sK, (iK, jK)), shape=(3 * nele, 3 * nele), dtype=np.float32)
+    K = (K + K.T) / 2
+
+    return K
+
+def compute_F(edofMat, Fe, x, voxel, existEle, nele):
+    iF = np.tile(edofMat.reshape(-1), 6)
+    jF = np.repeat(np.arange(6), 24 * len(existEle[0]))
+    sF = np.zeros(len(iF))
+    for i in range(len(Fe)):
+        x_current = x.copy()
+        x_current[np.where(voxel!=i)]=0
+        sF = sF + np.array(np.kron((x_current[existEle]**3).reshape(-1,1),Fe[i]).T.reshape((1,-1)))[0]
+    F = sparse.csr_matrix((sF,(iF,jF)),shape=((3*nele,6)),dtype=np.float32)
+    return F
+
+
+def compute_CH(i, j, Ke, U0, U, edofMat_, voxel, x, mesh_size):
+    sumCH = 0
+    for k in range(len(Ke)):
+        current_Ele = np.where((voxel == k) & (x > 0))
+        current_ELe_line = current_Ele[0] * mesh_size ** 2 + current_Ele[2] * mesh_size + mesh_size - 1 - current_Ele[1]
+        current_x_line = x[current_Ele]
+        sumCHi = np.multiply((U0[current_ELe_line, :, i] - U[edofMat_[current_ELe_line], i]).dot(Ke[k]), (U0[current_ELe_line, :, j] - U[edofMat_[current_ELe_line], j]))
+        sumCHi = np.sum(sumCHi, axis=1)
+        sumCH += np.sum(np.multiply(current_x_line, sumCHi))
+    return 1 / (mesh_size ** 3) * sumCH
 
 
 def calc_KeFe_thermal(k0, length_x, length_y, length_z):
@@ -341,7 +398,7 @@ E is base materials modulus of elasticity;
 nu is base materials possion's radio;
 x is the volume fraction on each element.
 """
-def homogenization3d(mesh_size, C0, x, voxel = None, Device = 'cpu'):
+def homogenization3d(mesh_size, C0, x, voxel = None, Device = 'cpu', num_cores = 1):
     if voxel is None:
         voxel = np.zeros_like(mesh_size)
     E0=1
@@ -392,28 +449,10 @@ def homogenization3d(mesh_size, C0, x, voxel = None, Device = 'cpu'):
     #     edofMat2[i,:] = 3*np.repeat(nodeid[grdzs,nely-grdys,grdxs],3) + np.kron([1]*8,[0,1,2])
     # print(np.sum(edofMat2-edofMat))
 
-    iK = np.reshape(np.kron(edofMat,np.ones((24,1))),(-1))
-    jK = np.reshape(np.kron(edofMat,np.ones((1,24))),(-1))
-    sK = np.zeros(len(iK))
-    for i in range(len(Ke)):
-        x_current = x.copy()
-        x_current[np.where(voxel!=i)]=0
-        sK = sK +np.reshape(np.dot(np.reshape(Ke[i],(24*24,1)),Emin+np.reshape(x_current[existEle]**3,(-1,1)).T*(E0-Emin)).T,(-1))
-
-
-    K = sparse.csc_matrix((sK,(iK,jK)),shape=(3*nele,3*nele),dtype=np.float32)
-    K = (K+K.T)/2
-
-    iF = edofMat.reshape((-1)).tolist()*6
-    jF = np.hstack(([0]*24*len(existEle[0]),[1]*24*len(existEle[0]),[2]*24*len(existEle[0]),[3]*24*len(existEle[0]),[4]*24*len(existEle[0]),[5]*24*len(existEle[0])))
-    sF = np.zeros(len(iF))
-    for i in range(len(Fe)):
-        x_current = x.copy()
-        x_current[np.where(voxel!=i)]=0
-        sF = sF + np.array(np.kron((x_current[existEle]**3).reshape(-1,1),Fe[i]).T.reshape((1,-1)))[0]
-
-    F = sparse.csc_matrix((sF,(iF,jF)),shape=((3*nele,6)),dtype=np.float32)
+    K = compute_K(edofMat, Ke, x, voxel, existEle, Emin, E0, nele)
+    F = compute_F(edofMat, Fe, x, voxel, existEle, nele)
     U = np.zeros((ndof,6))
+
     #---solve U matrix------
     stime = time.time()
     if Device == 'cpu':
@@ -436,18 +475,15 @@ def homogenization3d(mesh_size, C0, x, voxel = None, Device = 'cpu'):
         for i in range(6):
             U0[current_Ele[0]*mesh_size**2+current_Ele[2]*mesh_size+nely-1-current_Ele[1],:,i]=Ue[j][:,i]
 
-    CH=np.zeros((6,6))
+    CH = np.zeros((6, 6))
+    results = Parallel(n_jobs=num_cores)(
+        delayed(compute_CH)(i, j, Ke, U0, U, edofMat_, voxel, x, mesh_size)
+        for i in range(6)
+        for j in range(6)
+    )
     for i in range(6):
         for j in range(6):
-            sumCH = 0
-            for k in range(len(Ke)):
-                current_Ele  = np.where((voxel == k) & (x > 0))
-                current_ELe_line = current_Ele[0]*mesh_size**2+current_Ele[2]*mesh_size+nely-1-current_Ele[1]
-                current_x_line = x[current_Ele]
-                sumCHi = np.multiply((U0[current_ELe_line,:,i]-U[edofMat_[current_ELe_line],i]).dot(Ke[k]),(U0[current_ELe_line,:,j]-U[edofMat_[current_ELe_line],j]))
-                sumCHi = np.sum(sumCHi,axis=1)
-                sumCH = sumCH + np.sum(np.multiply(current_x_line,sumCHi))
-            CH[i,j] = 1/nele*sumCH
+            CH[i, j] = results[i * 6 + j]
 
     # Stress = np.zeros((6,6))
     # for idz in range(mesh_size):
