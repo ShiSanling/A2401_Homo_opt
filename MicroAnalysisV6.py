@@ -107,20 +107,20 @@ def compute_K(edofMat, Ke, x, voxel, existEle, Emin, E0, nele):
 
     return K
 
-def compute_K(edofMat, Ke, x, voxel, existEle, Emin, E0, nele):
-    iK = np.tile(edofMat, 24).flatten()
-    jK = np.repeat(edofMat, 24).flatten()
-    sK = np.zeros(len(iK))
-
-    x_current = x.copy()
-    x_current[np.where(voxel != 0)] = 0
-    x_norm = (Emin + x_current[existEle]**3 * (E0 - Emin)).flatten()
-    sK += np.kron(x_norm, Ke[0].flatten())
-
-    K = sparse.csr_matrix((sK, (iK, jK)), shape=(3 * nele, 3 * nele), dtype=np.float32)
-    K = (K + K.T) / 2
-
-    return K
+# def compute_K(edofMat, Ke, x, voxel, existEle, Emin, E0, nele):
+#     iK = np.tile(edofMat, 24).flatten()
+#     jK = np.repeat(edofMat, 24).flatten()
+#     sK = np.zeros(len(iK))
+#
+#     x_current = x.copy()
+#     x_current[np.where(voxel != 0)] = 0
+#     x_norm = (Emin + x_current[existEle]**3 * (E0 - Emin)).flatten()
+#     sK += np.kron(x_norm, Ke[0].flatten())
+#
+#     K = sparse.csr_matrix((sK, (iK, jK)), shape=(3 * nele, 3 * nele), dtype=np.float32)
+#     K = (K + K.T) / 2
+#
+#     return K
 
 def compute_F(edofMat, Fe, x, voxel, existEle, nele):
     iF = np.tile(edofMat.reshape(-1), 6)

@@ -151,7 +151,7 @@ def compute_K(edofMat, Ke, x, voxel, existEle, Emin, E0, nele):
     K = sparse.csr_matrix((sK, (iK, jK)), shape=(3 * nele, 3 * nele), dtype=np.float32)
     K = (K + K.T) / 2
 
-    return K
+    return K.astype(np.float32)
 
 
 def compute_F(edofMat, Fe, x, voxel, existEle, nele):
@@ -163,7 +163,7 @@ def compute_F(edofMat, Fe, x, voxel, existEle, nele):
         x_current[np.where(voxel!=i)]=0
         sF = sF + np.array(np.kron((x_current[existEle]**3).reshape(-1,1),Fe[i]).T.reshape((1,-1)))[0]
     F = sparse.csr_matrix((sF,(iF,jF)),shape=((3*nele,6)),dtype=np.float32)
-    return F
+    return F.astype(np.float32)
 
 
 """
@@ -283,8 +283,9 @@ if __name__=="__main__":
     C0 = []
     voxel = []
 
-    mesh_size= 160  # ! modify this parameter
+    mesh_size= 10  # ! modify this parameter
     x,_ = rf.TPMS2Mesh(mesh_size,1,rf.get_TPMS_func('Strut G'),0)
+    x = np.ones((mesh_size,mesh_size,mesh_size))
     print("voxel number:", np.sum(x))
     # x[np.where(x>0)] = 1
     # x = np.ones((mesh_size, mesh_size, mesh_size))*0.3
