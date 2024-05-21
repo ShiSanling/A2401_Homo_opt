@@ -1,15 +1,15 @@
-#!/bin/bash
 
-#SBATCH --job-name=python_Application
-#SBATCH --partition=debug64c512g
+#SBATCH -J cupy
+#SBATCH -p debuga100
+#SBATCH -N 1
 #SBATCH --ntasks-per-node=64
-#SBATCH -n 64
-#SBATCH --output=log/%j.out
-#SBATCH --error=log/%j.err
+#SBATCH --gres=gpu:1
+#SBATCH -o log/%j.out
+#SBATCH -e log/%j.err
 
 ulimit -s unlimited
 ulimit -l unlimited
 ulimit -c unlimited
 
 
-mpiexec -n 64 ./ksp -Ain A.txt -rhs b.txt
+python test1.py
