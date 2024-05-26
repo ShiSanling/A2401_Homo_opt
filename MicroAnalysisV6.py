@@ -71,6 +71,14 @@ def calc_KeFe(C0_s, length_x, length_y, length_z):
 
 def linalg_solve_gpu(K, F):
     K_gpu = cp.sparse.csc_matrix(K)
+    memory_usage_bytes = (
+            K_gpu.data.nbytes +
+            K_gpu.indices.nbytes +
+            K_gpu.indptr.nbytes
+    )
+    memory_usage_mb = memory_usage_bytes / (1024 ** 2)  # 转换为MB
+    print(f"Sparse Matrix Memory Usage: {memory_usage_mb:.2f} MB")
+
     x_all = np.zeros(F.shape)
     stime = time.time()
     streams = [cp.cuda.Stream() for _ in range(6)]  # 创建 6 个流
@@ -94,16 +102,17 @@ def linalg_solve_gpu(K, F):
 def compute_K(edofMat, Ke, x, voxel, existEle, Emin, E0, nele):
     iK = np.tile(edofMat, 24).flatten()
     jK = np.repeat(edofMat, 24).flatten()
-    sK = np.zeros(len(iK))
+    sK = np.zeros(len(iK),dtype=np.float32)
 
     for i in range(len(Ke)):
         x_current = x.copy()
         x_current[np.where(voxel != i)] = 0
-        x_norm = (Emin + x_current[existEle]**3 * (E0 - Emin)).flatten()
-        sK += np.kron(x_norm, Ke[i].flatten())
+        x_norm = (Emin + x_current[existEle]**3 * (E0 - Emin)).flatten().astype(np.float32)
+        Ke_flatten = Ke[i].flatten().astype(np.float32)
+        sK += np.kron(x_norm, Ke_flatten)
 
     K = sparse.csr_matrix((sK, (iK, jK)), shape=(3 * nele, 3 * nele), dtype=np.float32)
-    K = (K + K.T) / 2
+    # K = (K + K.T) / np.float32(2.0)
 
     return K
 
@@ -125,11 +134,12 @@ def compute_K(edofMat, Ke, x, voxel, existEle, Emin, E0, nele):
 def compute_F(edofMat, Fe, x, voxel, existEle, nele):
     iF = np.tile(edofMat.reshape(-1), 6)
     jF = np.repeat(np.arange(6), 24 * len(existEle[0]))
-    sF = np.zeros(len(iF))
+    sF = np.zeros(len(iF),dtype=np.float32)
     for i in range(len(Fe)):
-        x_current = x.copy()
+        x_current = x.copy().astype(np.float32)
         x_current[np.where(voxel!=i)]=0
-        sF = sF + np.array(np.kron((x_current[existEle]**3).reshape(-1,1),Fe[i]).T.reshape((1,-1)))[0]
+        Fei = Fe[i].astype(np.float32)
+        sF = sF + np.array(np.kron((x_current[existEle]**3).reshape(-1,1),Fei).T.reshape((1,-1)))[0]
     F = sparse.csr_matrix((sF,(iF,jF)),shape=((3*nele,6)),dtype=np.float32)
     return F
 
@@ -398,6 +408,7 @@ E is base materials modulus of elasticity;
 nu is base materials possion's radio;
 x is the volume fraction on each element.
 """
+
 def homogenization3d(mesh_size, C0, x, voxel = None, Device = 'cpu', num_cores = 1):
     if voxel is None:
         voxel = np.zeros_like(mesh_size)
